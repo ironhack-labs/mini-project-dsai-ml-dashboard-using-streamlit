@@ -1,42 +1,41 @@
 """
-backend.py — data loading, processing and plotting logic.
+backend.py — all the data and logic for the dashboard.
 
-I kept the streamlit frontend in the app.py for a clean separation according to the workflow given in 
-the Streamlit lesson: 
-    -> backend.py for python logic
-    -> app.py for the UI
+The Streamlit UI lives in app.py; this file only holds the Python logic, the way
+the Streamlit lesson suggests (backend = logic, app = UI).
 
-After some problems with the running MySQL-Server I had a check-in with AI and decided to follow the tip of
-having the data read from a portable SQLite file called data/sakila.db (built by build_db.py) so I don't need 
-a running MySQL server at all.
+The data is read from a small local SQLite file (data/sakila.db, created by
+build_db.py). That means the app needs no running MySQL server to work.
 """
 import sqlite3
 
-import matplotlib.pyplot as plt
 import plotly.express as px
 import pandas as pd
 import streamlit as st
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
+# Path to the local database file the app reads from.
 DB_PATH = "data/sakila.db"
 
 
 # ------------------------------------------------------------------ #
-# Data loading
+# Data loading (SQLite)
 # ------------------------------------------------------------------ #
-@st.cache_data  # update since st.cache deprecated
+@st.cache_data  # remembers the result so the same query does not hit the DB again
 def run_query(query: str) -> pd.DataFrame:
-    """Run a read-only SQL query against the SQLite database and cache the result."""
-    con = sqlite3.connect(DB_PATH)
+    """Open the SQLite database, run one SQL query, and return the rows as a DataFrame."""
+    con = sqlite3.connect(DB_PATH)          # open a connection to the .db file
     try:
-        return pd.read_sql(query, con)
+        return pd.read_sql(query, con)      # run the query, get the result as a table
     finally:
-        con.close()
+        con.close()                         # always close the connection, even on error
 
 
 def get_daily_rentals_2005() -> pd.DataFrame:
-    """Daily rental counts per store in 2005 (one column per store)."""
+    """How many rentals each store had per day in 2005."""
+    # rental tells us WHEN something was rented; inventory tells us WHICH STORE the
+    # rented copy belongs to. We join them, keep only 2005, and count per day + store.
     df = run_query(
         """
         SELECT date(r.rental_date) AS Day, i.store_id, COUNT(*) AS Rentals
@@ -47,14 +46,17 @@ def get_daily_rentals_2005() -> pd.DataFrame:
         ORDER BY day
         """
     )
+    # Reshape from long to wide: one row per day, one column per store (easier to plot).
     pivot = df.pivot(index="Day", columns="store_id", values="Rentals").fillna(0)
-    pivot.index = pd.to_datetime(pivot.index)
-    pivot.columns = [f"Store {c}" for c in pivot.columns]
+    pivot.index = pd.to_datetime(pivot.index)            # turn date strings into real dates
+    pivot.columns = [f"Store {c}" for c in pivot.columns]  # rename 1/2 -> "Store 1"/"Store 2"
     return pivot
 
 
 def get_benefit_by_store() -> pd.DataFrame:
-    """Total benefit (sum of payments) per store."""
+    """Total money earned (sum of all payments) per store."""
+    # payment holds the amounts; staff tells us which store a payment belongs to.
+    # We join them and add up the amounts for each store.
     return run_query(
         """
         SELECT s.store_id, ROUND(SUM(p.amount), 2) AS Benefit
@@ -66,7 +68,9 @@ def get_benefit_by_store() -> pd.DataFrame:
 
 
 def get_top5_movies_by_store() -> pd.DataFrame:
-    """Rental counts per (store, film) in 2005 — frontend slices the top 5 per store."""
+    """How often each film was rented per store in 2005."""
+    # Chain of joins: rental -> inventory (gives store + film_id) -> film (gives the title).
+    # We count the rentals per film per store; the UI later keeps only the top 5 per store.
     return run_query(
         """
         SELECT i.store_id, f.title AS Title, COUNT(*) AS "Times Rented"
@@ -80,25 +84,28 @@ def get_top5_movies_by_store() -> pd.DataFrame:
 
 
 # ------------------------------------------------------------------ #
-# Plots ((matplotlib figures -> super ugly, changed to .plotly), displayed with st.plotly)
+# Plots (Plotly figures, shown with st.plotly_chart)
 # ------------------------------------------------------------------ #
 def plot_daily_rentals(pivot):
+    # Line chart: one line per store over time.
     fig = px.line(
-        pivot,                                  # wide-form: Index = x-axis, every column = 1 line // still not sure about this
+        pivot,
         labels={"value": "Rentals", "variable": "Store", "Day": "Date"},
-        title="Daily Rentals by Store for 2005",
-        template="plotly_white",                # clean look
+        template="plotly_white",
     )
     fig.update_layout(
-        title_x=0.5,                            # Titel zentrieren
+        title=dict(text="Daily Rentals by Store for 2005",
+                   x=0.5, xanchor="center", xref="container"),
         font=dict(family="Avenir, 'Avenir Next', sans-serif"),
-        hovermode="x unified",                  # tooltip while hover, fancy stuff
+        hovermode="x unified",
+        height=450,
         legend_title_text="",
     )
     return fig
 
 
 def plot_benefit_by_store(df):
+    # Bar chart: one bar per store with the total benefit on top.
     df = df.copy()
     df["Store"] = "Store " + df["store_id"].astype(str)
     fig = px.bar(
@@ -107,42 +114,50 @@ def plot_benefit_by_store(df):
         y="Benefit",
         color="Store",
         text="Benefit",
-        title="Total Benefit by Store",
         template="plotly_white",
     )
     fig.update_traces(
         texttemplate="%{text:,.0f}",
         textposition="outside",
-        cliponaxis=False,        # Label darf über die Achse hinaus -> nicht mehr abgeschnitten
+        cliponaxis=False,        # let the value label show outside the plot (no cut-off)
     )
-    fig.update_yaxes(range=[0, df["Benefit"].max() * 1.15])  # extra Luft über den Balken
+    fig.update_yaxes(range=[0, df["Benefit"].max() * 1.15])  # add headroom above the bars
     fig.update_layout(
-        title_x=0.5,
+        title=dict(text="Total Benefit by Store",
+                   x=0.5, xanchor="center", xref="container"),
         font=dict(family="Avenir, 'Avenir Next', sans-serif"),
         showlegend=False,
-        height=450,              # größere Figur ("figsize")
-        bargap=0.5,              # Balkenbreite/Abstand: höher = schmalere Balken
+        height=450,
+        bargap=0.5,
     )
     return fig
 
 
 # ------------------------------------------------------------------ #
-# Prediction: semantic movie search
+# Prediction: find similar movies with embeddings
 # ------------------------------------------------------------------ #
-@st.cache_resource  # cache the model + embeddings once for the whole session
+@st.cache_resource  # load the model and build the embeddings only once per session
 def load_film_embeddings():
-    """Load films and encode their descriptions with a Sentence Transformer."""
+    """Load all films and turn every film description into a number vector (an embedding)."""
     films = run_query("SELECT film_id, title, description, rating FROM film")
+    # This model maps a piece of text to a vector. Texts with a similar meaning get
+    # similar vectors, even if they use different words.
     model = SentenceTransformer("all-MiniLM-L6-v2")
+    # Encode every film description once. This is the slow part, so we cache it.
     embeddings = model.encode(films["description"].tolist(), show_progress_bar=False)
     return model, films, embeddings
 
 
 def find_similar_movies(description, model, films, embeddings, top_n=3) -> pd.DataFrame:
-    """Return the top_n films whose description is most similar to the input text."""
+    """Take the user's text and return the top_n films with the most similar description."""
+    # Turn the user's input into a vector, in the same "meaning space" as the films.
     query_embedding = model.encode([description])
+    # Cosine similarity = how close two vectors point in the same direction (1 = identical).
     sims = cosine_similarity(query_embedding, embeddings)[0]
+    # argsort sorts low -> high, so we reverse ([::-1]) and take the first top_n indices.
     top_idx = sims.argsort()[::-1][:top_n]
-    results = films.iloc[top_idx][["title", "rating"]].copy()
+    # Pick those films and attach their similarity score.
+    results = films.iloc[top_idx][["title", "rating", "description"]].copy()
     results["similarity"] = sims[top_idx].round(3)
+    results = results[["title", "rating", "similarity", "description"]]  # column order
     return results.reset_index(drop=True)
