@@ -1,0 +1,7 @@
+streamlit
+pandas
+scikit-learn
+sentence-transformers
+# only needed to re-run build_db.py against MySQL
+sqlalchemy
+pymysql

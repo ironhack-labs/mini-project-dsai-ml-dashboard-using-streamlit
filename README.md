@@ -49,3 +49,34 @@ Must contain a `st.text_area()` that will allow the user to input a movie descri
 ## Submission
 
 Upon completion, add your deliverables to git. Then commit git and push your branch to the remote.
+
+---
+
+## Running this project
+
+The app reads from a portable SQLite database (`data/sakila.db`) so **no running MySQL
+server is required**.
+
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+### Project structure
+- `backend.py` — data loading, SQL queries, plots and the embedding logic
+- `app.py` — Streamlit frontend (`main()` with sidebar navigation)
+- `build_db.py` — one-time ETL: MySQL Sakila → portable `data/sakila.db`
+- `data/sakila.db` — the database the app reads from
+
+### Pages
+- **Home** — title + image
+- **EDA** — daily rentals per store (2005), total benefit per store, top-5 rented films per store
+- **Prediction** — enter a movie description, get the 3 most similar films (Sentence Transformer + cosine similarity), with title and rating
+
+### Rebuilding the database (optional)
+`data/sakila.db` is already included. To regenerate it from a MySQL Sakila instance,
+adjust the connection string in `build_db.py` and run:
+
+```bash
+python build_db.py
+```
