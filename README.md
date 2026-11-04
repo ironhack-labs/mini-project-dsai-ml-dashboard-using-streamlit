@@ -1,51 +1,76 @@
-![logo_ironhack_blue 7](https://user-images.githubusercontent.com/23629340/40541063-a07a0a8a-601a-11e8-91b5-2f13e4e6b441.png)
+# Sakila DVD Rentals — Streamlit Lab
 
-# Mini Project | Data - Create a Machine Learning dashboard using Streamlit
+A three-page Streamlit dashboard built on the supplied Sakila SQLite database.
 
-## Mini Project Overview
+## What the application does
 
-This is a 2-day hands-on mini project where you need to create a streamlit application for the Sakila database. This application must contain three pages:
+1. **Home:** four management KPIs (films, customers, rentals, lifetime revenue).
+2. **Explore:** daily store rentals in 2005, total revenue by store, and each store's five most-rented films in 2005.
+3. **Find similar films:** semantic recommendations using `sentence-transformers/all-MiniLM-L6-v2` and cosine similarity.
 
-- Home
-- EDA
-- Prediction
+## Reproducible setup
 
-## Instructions
+Run these commands from this `your-code` directory (the database remains in the sibling `data/` directory):
 
-### Dataset
+```bash
+python -m venv .venv
+source .venv/bin/activate       # Windows: .venv\\Scripts\\activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+streamlit run Home.py
+```
 
-In this project, you will be using the [Sakila](https://dev.mysql.com/doc/sakila/en/) database of movie rentals. You can follow the steps listed here to get the data locally: [Sakila sample database - installation](https://dev.mysql.com/doc/sakila/en/sakila-installation.html). You can work with two sql query files - `sakila-schema.sql` (creates the schema) + `sakila-data.sql` which inserts the data.
+The first recommendation request downloads the MiniLM model if it is not already cached. Internet access is therefore required once for model acquisition. The SQL pages do not require a model or API key.
 
-The ERD is pictured below - not all tables are shown, but many of the key fields you will be using are visible:
+## Validation
 
-<br>
+```bash
+python check_app.py
+```
 
-![DB schema](https://education-team-2020.s3-eu-west-1.amazonaws.com/data-analytics/database-sakila-schema.png)
+The automated Streamlit `AppTest` checks each page without opening a browser. The recommendation check downloads/loads the model and can take longer on first run.
 
-<br><br>
+## Data and SQL pipeline
 
-## Requirements
+- `Home.py`: scalar subqueries calculate catalogue, customer, rental and payment totals.
+- `pages/1_Explore.py`: `rental -> inventory` identifies the store for each rental; SQLite `DATE()` and `STRFTIME()` extract day/year. The daily data is pivoted so each store is one chart series.
+- Revenue follows `payment -> rental -> inventory`, grouping payment amounts by store.
+- Film ranking follows `rental -> inventory -> film`, filters rental dates to 2005 and uses `ROW_NUMBER()` partitioned by store to return five deterministic results per store.
+- `pages/2_Find_similar_films.py`: the model and film vectors are cached with `st.cache_resource`; all 1,000 descriptions are embedded once. Normalised embeddings make a dot product equivalent to cosine similarity.
 
-### Home page
+## Expected database checkpoints
 
-Must contain a title and an image of your choice.
+| KPI | Expected |
+|---|---:|
+| Films | 1,000 |
+| Customers | 599 |
+| Rentals | 16,044 |
+| Revenue | $67,416.51 |
 
-### EDA page
+Store revenue is approximately $33,679.79 (Store 1) and $33,726.77 (Store 2). The 2005 rental sample has 40 recorded days between 24 May and 23 August 2005; missing dates are gaps in the sample, not synthetic zero observations. Store 1's leading film is **LOVE SUICIDES** (20 rentals), and Store 2's is **IDOLS SNATCHERS** (20 rentals).
 
-Must contain the following plots:
+The exact top-five lists use a deterministic title sort to break ties.
 
-- A line plot of daily rentals by each store in 2005
-- A bar plot with the total benefit by each store
-- A dataframe with the top five most rented movies by each store in 2005. Hint: use `st.dataframe(df)`
+## Project structure
 
-### Prediction page
+```text
+Lab_Streamlit/
+├── data/
+│   ├── sakila.db
+│   └── LICENSE-sakila.txt
+└── your-code/
+    ├── Home.py
+    ├── sakila.py
+    ├── check_app.py
+    ├── requirements.txt
+    └── pages/
+        ├── 1_Explore.py
+        └── 2_Find_similar_films.py
+```
 
-<!-- Must contain a `st.text_area()` that will allow the user to input a movie description and get a prediction from the movie rating prediction model created yesterday.
-It also must contain an `st.button("Get Your Prediction")` button. -->
+## Notes
 
-Must contain a `st.text_area()` that will allow the user to input a movie description and get the top 3 most similar movies by description. Display the matches’ title and rating. It also must contain an `st.button(“Get Your Prediction”)` button. HINT: use the embedding model (Sentence Transformer) and the cosine similarity function.
-
-
-## Submission
-
-Upon completion, add your deliverables to git. Then commit git and push your branch to the remote.
+- `sakila.py` resolves the database path relative to its own location, so launch the app from `your-code` as shown above.
+- Streamlit reruns the script after interactions. Cached database reads, model loading and film embeddings prevent expensive work from repeating.
+- No external API key is required. The sentence-transformer model is downloaded from its model host on first use.
+- Database: Sakila SQLite distribution maintained by jOOQ; see `data/LICENSE-sakila.txt`.
